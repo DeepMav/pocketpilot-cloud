@@ -14,6 +14,13 @@
 // The signaling WebSocket is reconnected with exponential backoff when it
 // drops. While the WS is healthy, sequential WebRTC sessions are handled
 // (one phone at a time for now).
+//
+// Test modes:
+//
+//   -debug-mavlink   Log parsed MAVLink frame headers as they arrive.
+//                    Useful regardless of whether a phone is connected.
+//   -skip-signaling  Run only the mavbridge (no auth, no signaling, no
+//                    WebRTC). For T1-style "is PX4 reaching us?" checks.
 package main
 
 import (
@@ -46,6 +53,8 @@ type config struct {
 	mavlinkListen string
 	minDelay      time.Duration
 	maxDelay      time.Duration
+	debugMavlink  bool
+	skipSignaling bool
 }
 
 func main() {
@@ -57,6 +66,8 @@ func main() {
 	flag.StringVar(&cfg.mavlinkListen, "mavlink-listen", ":14550", "local UDP address for MAVLink (autopilot sends here)")
 	flag.DurationVar(&cfg.minDelay, "reconnect-min", time.Second, "min backoff before reconnecting to signal")
 	flag.DurationVar(&cfg.maxDelay, "reconnect-max", 30*time.Second, "max backoff before reconnecting to signal")
+	flag.BoolVar(&cfg.debugMavlink, "debug-mavlink", false, "log parsed MAVLink frame headers (HEARTBEAT, etc.) as they arrive")
+	flag.BoolVar(&cfg.skipSignaling, "skip-signaling", false, "skip signaling client and run mavbridge alone (T1 testing)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -64,8 +75,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The local MAVLink bridge survives across signal reconnects and
-	// WebRTC sessions.
 	bridge, err := mavbridge.Listen(cfg.mavlinkListen)
 	if err != nil {
 		slog.Error("mavbridge listen", "err", err)
@@ -77,6 +86,18 @@ func main() {
 			slog.Warn("mavbridge run ended", "err", err)
 		}
 	}()
+
+	if cfg.debugMavlink {
+		installTelemetryHandler(bridge, nil, true)
+		slog.Info("debug-mavlink enabled; logging frame headers as they arrive")
+	}
+
+	if cfg.skipSignaling {
+		slog.Info("skip-signaling mode; mavbridge alone (Ctrl-C to exit)")
+		<-ctx.Done()
+		slog.Info("relay exited")
+		return
+	}
 
 	runWithBackoff(ctx, cfg.minDelay, cfg.maxDelay, func(ctx context.Context) error {
 		return sessionCycle(ctx, cfg, bridge)
@@ -130,12 +151,12 @@ func sessionCycle(ctx context.Context, cfg config, bridge *mavbridge.UDP) error 
 		return fmt.Errorf("hello: %w", err)
 	}
 
-	return runWSLoop(ctx, conn, bridge)
+	return runWSLoop(ctx, conn, bridge, cfg.debugMavlink)
 }
 
 // runWSLoop drives the signaling WS until it dies. Multiple sequential
 // WebRTC sessions may come and go on this same WS.
-func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP) error {
+func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, debug bool) error {
 	var (
 		pc        *webrtc.PeerConnection
 		sessionID string
@@ -144,7 +165,7 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP) e
 		if pc != nil {
 			_ = pc.Close()
 		}
-		bridge.SetOnPacket(nil)
+		installTelemetryHandler(bridge, nil, debug)
 	}()
 
 	for {
@@ -171,16 +192,15 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP) e
 				slog.Warn("relay got initiator=true; relay is answerer only", "session", m.Session)
 				continue
 			}
-			// Tear down any prior session before starting a new one.
 			if pc != nil {
 				_ = pc.Close()
 				pc = nil
-				bridge.SetOnPacket(nil)
+				installTelemetryHandler(bridge, nil, debug)
 			}
 			sessionID = m.Session
 			slog.Info("session.ack",
 				"session", m.Session, "peer", m.Peer, "ice_servers", len(m.IceServers))
-			newPC, err := newPeerConn(ctx, ws, sessionID, m.IceServers, bridge)
+			newPC, err := newPeerConn(ctx, ws, sessionID, m.IceServers, bridge, debug)
 			if err != nil {
 				slog.Error("pc setup", "err", err)
 				continue
@@ -244,7 +264,7 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP) e
 				_ = pc.Close()
 				pc = nil
 			}
-			bridge.SetOnPacket(nil)
+			installTelemetryHandler(bridge, nil, debug)
 
 		case sig.KindErr:
 			var m sig.ErrMsg
@@ -254,7 +274,7 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP) e
 	}
 }
 
-func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceServers []sig.IceServer, bridge *mavbridge.UDP) (*webrtc.PeerConnection, error) {
+func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceServers []sig.IceServer, bridge *mavbridge.UDP, debug bool) (*webrtc.PeerConnection, error) {
 	cfg := webrtc.Configuration{}
 	for _, s := range iceServers {
 		cfg.ICEServers = append(cfg.ICEServers, webrtc.ICEServer{
@@ -289,7 +309,7 @@ func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceSer
 		case webrtc.PeerConnectionStateFailed,
 			webrtc.PeerConnectionStateClosed,
 			webrtc.PeerConnectionStateDisconnected:
-			bridge.SetOnPacket(nil)
+			installTelemetryHandler(bridge, nil, debug)
 		}
 	})
 
@@ -298,7 +318,7 @@ func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceSer
 		slog.Info("data channel arrived", "label", label, "ordered", dc.Ordered())
 		switch label {
 		case "tlm":
-			wireTelemetry(dc, bridge)
+			wireTelemetry(dc, bridge, debug)
 		case "cmd":
 			wireCommand(dc, bridge)
 		case "evt":
@@ -312,18 +332,38 @@ func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceSer
 }
 
 // wireTelemetry: autopilot UDP -> DataChannel.
-func wireTelemetry(dc *webrtc.DataChannel, bridge *mavbridge.UDP) {
+func wireTelemetry(dc *webrtc.DataChannel, bridge *mavbridge.UDP, debug bool) {
 	dc.OnOpen(func() {
 		slog.Info("tlm open; forwarding UDP -> DC")
-		bridge.SetOnPacket(func(pkt []byte) {
-			if err := dc.Send(pkt); err != nil {
-				slog.Warn("tlm dc send", "err", err)
-			}
-		})
+		installTelemetryHandler(bridge, dc, debug)
 	})
 	dc.OnClose(func() {
 		slog.Info("tlm closed")
+		installTelemetryHandler(bridge, nil, debug)
+	})
+}
+
+// installTelemetryHandler attaches an onPacket on the mavbridge that
+// (optionally) logs each frame and (optionally) forwards to a DataChannel.
+// Both off → bridge callback cleared.
+func installTelemetryHandler(bridge *mavbridge.UDP, dc *webrtc.DataChannel, debug bool) {
+	var dbg func([]byte)
+	if debug {
+		dbg = makeDebugLogger()
+	}
+	if dc == nil && dbg == nil {
 		bridge.SetOnPacket(nil)
+		return
+	}
+	bridge.SetOnPacket(func(pkt []byte) {
+		if dbg != nil {
+			dbg(pkt)
+		}
+		if dc != nil {
+			if err := dc.Send(pkt); err != nil {
+				slog.Warn("tlm dc send", "err", err)
+			}
+		}
 	})
 }
 
