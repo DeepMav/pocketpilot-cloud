@@ -1,5 +1,7 @@
 # pocketpilot-cloud
 
+[![CI](https://github.com/DeepMav/pocketpilot-cloud/actions/workflows/ci.yml/badge.svg)](https://github.com/DeepMav/pocketpilot-cloud/actions/workflows/ci.yml)
+
 Cloud services for PocketPilot WebRTC rendezvous over mobile networks.
 
 ## Components
