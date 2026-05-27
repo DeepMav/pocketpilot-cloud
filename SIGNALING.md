@@ -131,8 +131,8 @@ Sent inside `session.ack`. Hand directly to WebRTC's `RTCConfiguration.iceServer
 ```json
 {
   "urls": ["turn:43.203.28.242:3478?transport=udp"],
-  "username": "ic2vista",
-  "credential": "ic2vista2024!"
+  "username": "<your-coturn-username>",
+  "credential": "<your-coturn-credential>"
 }
 ```
 

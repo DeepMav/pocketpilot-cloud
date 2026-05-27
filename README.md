@@ -13,8 +13,8 @@ Cloud services for PocketPilot WebRTC rendezvous over mobile networks.
 | `cmd/relay` | Drone-side companion: PX4 UDP ↔ WebRTC DataChannel via pion | — (egress only) |
 | `cmd/testpeer` | Stub answerer for client development (no PX4 required) | — |
 
-The TURN relay is a separate deployment — existing coturn at
-`harvey7926/ic2vista-coturn:latest`.
+The TURN relay is a separate deployment — the user-owned coturn image
+on Docker Hub.
 
 ## Prerequisites
 
@@ -44,9 +44,9 @@ Or run directly:
 
     # Terminal 2 — signal service (same JWT_SECRET)
     go run ./cmd/signal -addr :8080 `
-      -turn-uri 'turn:43.203.28.242:3478?transport=udp' `
-      -turn-user ic2vista `
-      -turn-pass 'ic2vista2024!'
+      -turn-uri 'turn:<your-turn-host>:3478?transport=udp' `
+      -turn-user '<your-username>' `
+      -turn-pass '<your-credential>'
 
     # Terminal 3 — drone-side bridge (PX4 SITL must send MAVLink to 127.0.0.1:14550)
     go run ./cmd/relay -mavlink-listen :14550
