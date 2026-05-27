@@ -25,10 +25,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true
 
-      - name: Download modules
-        run: go mod download
+      # Bootstrap: go.sum is not yet committed (user has no local Go install).
+      # Once go.sum lands in the repo, switch this to `go mod download` +
+      # `go mod verify` for strict mode and re-enable setup-go caching.
+      - name: go mod tidy
+        run: go mod tidy
 
       - name: gofmt
         run: |
