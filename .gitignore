@@ -2,6 +2,7 @@
 *.test
 *.out
 *.exe
+*.log
 .env
 .env.*
 .idea/
