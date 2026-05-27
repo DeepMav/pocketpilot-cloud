@@ -27,6 +27,14 @@ type session struct {
 }
 
 func NewHub(ice []IceServer) *Hub {
+	// Normalize a nil slice to an empty one so the field always serializes
+	// to a JSON `[]`, never `null`. Clients that decode `ice_servers` into
+	// a non-nullable list type (kotlinx-serialization without
+	// coerceInputValues, swift-codable, etc.) would otherwise throw on
+	// the wire when no TURN is configured.
+	if ice == nil {
+		ice = []IceServer{}
+	}
 	return &Hub{
 		iceServers: ice,
 		peers:      map[PeerID]*Peer{},
@@ -34,6 +42,9 @@ func NewHub(ice []IceServer) *Hub {
 	}
 }
 
+// IceServers returns the configured ICE servers. The returned slice is
+// always non-nil so callers can JSON-marshal it without producing
+// `null` on the wire — see [NewHub].
 func (h *Hub) IceServers() []IceServer { return h.iceServers }
 
 var (
