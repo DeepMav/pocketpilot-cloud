@@ -17,10 +17,10 @@
 //
 // Test modes:
 //
-//   -debug-mavlink   Log parsed MAVLink frame headers as they arrive.
-//                    Useful regardless of whether a phone is connected.
-//   -skip-signaling  Run only the mavbridge (no auth, no signaling, no
-//                    WebRTC). For T1-style "is PX4 reaching us?" checks.
+//	-debug-mavlink   Log parsed MAVLink frame headers as they arrive.
+//	                 Useful regardless of whether a phone is connected.
+//	-skip-signaling  Run only the mavbridge (no auth, no signaling, no
+//	                 WebRTC). For T1-style "is PX4 reaching us?" checks.
 package main
 
 import (
