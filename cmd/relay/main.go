@@ -56,6 +56,8 @@ type config struct {
 	maxDelay      time.Duration
 	debugMavlink  bool
 	skipSignaling bool
+	cameraDev     string
+	cameraSize    string
 }
 
 func main() {
@@ -69,6 +71,8 @@ func main() {
 	flag.DurationVar(&cfg.maxDelay, "reconnect-max", 30*time.Second, "max backoff before reconnecting to signal")
 	flag.BoolVar(&cfg.debugMavlink, "debug-mavlink", false, "log parsed MAVLink frame headers (HEARTBEAT, etc.) as they arrive")
 	flag.BoolVar(&cfg.skipSignaling, "skip-signaling", false, "skip signaling client and run mavbridge alone (T1 testing)")
+	flag.StringVar(&cfg.cameraDev, "camera", "", "v4l2 device for the H.264 video track (e.g. /dev/video0). empty = no video")
+	flag.StringVar(&cfg.cameraSize, "camera-size", "1280x720", "video resolution passed to ffmpeg -video_size")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -152,17 +156,20 @@ func sessionCycle(ctx context.Context, cfg config, bridge *mavbridge.UDP) error 
 		return fmt.Errorf("hello: %w", err)
 	}
 
-	return runWSLoop(ctx, conn, bridge, cfg.debugMavlink)
+	return runWSLoop(ctx, conn, bridge, cfg)
 }
 
 // runWSLoop drives the signaling WS until it dies. Multiple sequential
 // WebRTC sessions may come and go on this same WS.
-func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, debug bool) error {
+func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, cfg config) error {
 	var (
 		pc        *webrtc.PeerConnection
 		sessionID string
+		camera    *videoSource
 	)
+	debug := cfg.debugMavlink
 	defer func() {
+		camera.Close()
 		if pc != nil {
 			_ = pc.Close()
 		}
@@ -198,6 +205,8 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, d
 				pc = nil
 				installTelemetryHandler(bridge, nil, debug)
 			}
+			camera.Close()
+			camera = nil
 			sessionID = m.Session
 			slog.Info("session.ack",
 				"session", m.Session, "peer", m.Peer, "ice_servers", len(m.IceServers))
@@ -224,6 +233,27 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, d
 			}); err != nil {
 				slog.Error("set remote", "err", err)
 				continue
+			}
+			// If the operator passed -camera, start ffmpeg + RTP track and
+			// add it to the PeerConnection before generating the answer so
+			// the answer SDP advertises the video media. If the remote
+			// offer didn't include a video transceiver, AddTrack still
+			// works (pion creates a new transceiver), but the client won't
+			// receive video unless its offer asked for it.
+			if cfg.cameraDev != "" && camera == nil {
+				vs, vsErr := startVideoSource(ctx, cfg.cameraDev, cfg.cameraSize)
+				if vsErr != nil {
+					slog.Error("camera start failed (continuing without video)", "err", vsErr)
+				} else {
+					camera = vs
+					if _, addErr := pc.AddTrack(vs.track); addErr != nil {
+						slog.Error("AddTrack failed", "err", addErr)
+						camera.Close()
+						camera = nil
+					} else {
+						slog.Info("video track added", "codec", "H264", "resolution", cfg.cameraSize)
+					}
+				}
 			}
 			answer, err := pc.CreateAnswer(nil)
 			if err != nil {
@@ -265,6 +295,8 @@ func runWSLoop(ctx context.Context, ws *websocket.Conn, bridge *mavbridge.UDP, d
 				_ = pc.Close()
 				pc = nil
 			}
+			camera.Close()
+			camera = nil
 			installTelemetryHandler(bridge, nil, debug)
 
 		case sig.KindErr:
