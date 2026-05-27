@@ -316,7 +316,17 @@ func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceSer
 			Credential: s.Credential,
 		})
 	}
-	pc, err := webrtc.NewPeerConnection(cfg)
+	// MediaEngine carries the codec table that gets advertised in SDP.
+	// pion's NewPeerConnection() does NOT register any codecs by default —
+	// CreateAnswer then bails with "RTPSender created with no codecs"
+	// when we try to add an H.264 video track. RegisterDefaultCodecs adds
+	// VP8/VP9/H.264/Opus, which matches what libwebrtc-android negotiates.
+	mediaEngine := &webrtc.MediaEngine{}
+	if rcErr := mediaEngine.RegisterDefaultCodecs(); rcErr != nil {
+		return nil, fmt.Errorf("register default codecs: %w", rcErr)
+	}
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
+	pc, err := api.NewPeerConnection(cfg)
 	if err != nil {
 		return nil, err
 	}

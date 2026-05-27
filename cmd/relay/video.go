@@ -28,10 +28,10 @@ import (
 // simple and means the keyframe / timestamp / SSRC details are whatever
 // ffmpeg emits.
 type videoSource struct {
-	track    *webrtc.TrackLocalStaticRTP
-	conn     *net.UDPConn
-	ffmpeg   *exec.Cmd
-	cancel   context.CancelFunc
+	track  *webrtc.TrackLocalStaticRTP
+	conn   *net.UDPConn
+	ffmpeg *exec.Cmd
+	cancel context.CancelFunc
 }
 
 // startVideoSource starts ffmpeg against [cameraDev] and returns a track
@@ -41,8 +41,16 @@ type videoSource struct {
 // resolution: e.g. "1280x720"; framerate is fixed at 30 fps (matches the
 // USB camera's native MJPG mode).
 func startVideoSource(parent context.Context, cameraDev, resolution string) (*videoSource, error) {
+	// Match one of the H.264 profiles RegisterDefaultCodecs adds (PT 102),
+	// otherwise codecParametersFuzzySearch fails to bind the sender to a
+	// MediaEngine codec entry and CreateAnswer bails with
+	// "RTPSender created with no codecs".
 	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+		webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH264,
+			ClockRate:   90000,
+			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+		},
 		"video", "pi-camera",
 	)
 	if err != nil {
