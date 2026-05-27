@@ -191,7 +191,8 @@ receives them via the `ondatachannel` callback after `setRemoteDescription`.
 ## Implementation pointers
 
 - Server: `internal/signal/messages.go` (wire types), `internal/signal/peer.go` (dispatcher), `internal/signal/hub.go` (registry/routing), `cmd/signal/main.go` (entry).
-- Stub answerer (for client development): `cmd/testpeer/main.go` — connects as `drone-42`, accepts the offer, echoes any DataChannel bytes.
+- Drone-side bridge (answerer, production): `cmd/relay/main.go` + `internal/mavbridge/` — bridges DataChannels to a local PX4/ArduPilot UDP socket. Reconnects to signal with exponential backoff; handles sequential phone sessions.
+- Stub answerer (for client development, no PX4 needed): `cmd/testpeer/main.go` — echoes any DataChannel bytes.
 - Android client (initiator): `PocketPilot/app/.../signaling/` (Kotlin DTOs to be written by the Android session) — implement against the shapes in this document.
 
 ## Changing this contract

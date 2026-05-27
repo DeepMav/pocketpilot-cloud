@@ -8,7 +8,8 @@ Cloud services for PocketPilot WebRTC rendezvous over mobile networks.
 |---|---|---|
 | `cmd/auth` | Authentication: issues JWTs, owns user/drone accounts | `:8081` |
 | `cmd/signal` | Signaling: WebSocket hub, SDP/ICE routing, ICE server hand-out | `:8080` |
-| `cmd/relay` | (TODO next iteration) Drone-side companion: PX4 UDP ↔ WebRTC DataChannel | — |
+| `cmd/relay` | Drone-side companion: PX4 UDP ↔ WebRTC DataChannel via pion | — (egress only) |
+| `cmd/testpeer` | Stub answerer for client development (no PX4 required) | — |
 
 The TURN relay is a separate deployment — existing coturn at
 `harvey7926/ic2vista-coturn:latest`.
@@ -44,6 +45,12 @@ Or run directly:
       -turn-uri 'turn:43.203.28.242:3478?transport=udp' `
       -turn-user ic2vista `
       -turn-pass 'ic2vista2024!'
+
+    # Terminal 3 — drone-side bridge (PX4 SITL must send MAVLink to 127.0.0.1:14550)
+    go run ./cmd/relay -mavlink-listen :14550
+
+    # …or, with no PX4 on hand, use testpeer (echoes DataChannel bytes)
+    go run ./cmd/testpeer
 
 ## Smoke test
 
@@ -94,7 +101,6 @@ Server kinds: `hello.ok`, `session.ack`, `peer.sdp`, `peer.ice`, `peer.gone`,
 
 ## TODO (next iterations)
 
-- `cmd/relay` — drone-side bridge (PX4 UDP ↔ DataChannel) using pion/webrtc
 - TURN ephemeral credentials per RFC 7635 (replace static `-turn-user/-pass`)
 - RS256 + JWKS endpoint on `cmd/auth`, drop shared HMAC
 - Persistent user store (SQLite → Postgres)
