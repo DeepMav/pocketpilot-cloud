@@ -43,6 +43,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"github.com/deepmav/pocketpilot-cloud/internal/mavbridge"
+	"github.com/deepmav/pocketpilot-cloud/internal/mavframe"
 	sig "github.com/deepmav/pocketpilot-cloud/internal/signal"
 )
 
@@ -349,7 +350,7 @@ func wireTelemetry(dc *webrtc.DataChannel, bridge *mavbridge.UDP, debug bool) {
 func installTelemetryHandler(bridge *mavbridge.UDP, dc *webrtc.DataChannel, debug bool) {
 	var dbg func([]byte)
 	if debug {
-		dbg = makeDebugLogger()
+		dbg = mavframe.NewDebugLogger("udp")
 	}
 	if dc == nil && dbg == nil {
 		bridge.SetOnPacket(nil)
