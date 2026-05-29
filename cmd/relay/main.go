@@ -40,6 +40,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/deepmav/pocketpilot-cloud/internal/mavbridge"
@@ -325,7 +326,21 @@ func newPeerConn(ctx context.Context, ws *websocket.Conn, session string, iceSer
 	if rcErr := mediaEngine.RegisterDefaultCodecs(); rcErr != nil {
 		return nil, fmt.Errorf("register default codecs: %w", rcErr)
 	}
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
+	// NACK only: recover 5G short-burst packet loss via RTX without
+	// TWCC's dynamic bitrate cuts (which were hurting frame steadiness
+	// in measurement). RTCP reports are kept so pion + the phone share
+	// RR/SR for loss visibility.
+	interceptorRegistry := &interceptor.Registry{}
+	if err := webrtc.ConfigureNack(mediaEngine, interceptorRegistry); err != nil {
+		return nil, fmt.Errorf("configure nack: %w", err)
+	}
+	if err := webrtc.ConfigureRTCPReports(interceptorRegistry); err != nil {
+		return nil, fmt.Errorf("configure rtcp reports: %w", err)
+	}
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(interceptorRegistry),
+	)
 	pc, err := api.NewPeerConnection(cfg)
 	if err != nil {
 		return nil, err

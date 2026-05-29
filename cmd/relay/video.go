@@ -82,12 +82,14 @@ func startVideoSource(parent context.Context, cameraDev, resolution string) (*vi
 		"-preset", "ultrafast",
 		"-profile:v", "baseline",
 		"-pix_fmt", "yuv420p",
-		// Reasonable bitrate ceiling for 720p; ffmpeg's libx264 picks a
-		// rate-control mode based on tune/preset.
-		"-b:v", "2000k",
-		"-maxrate", "2500k",
-		"-bufsize", "2500k",
-		"-g", "60", // keyframe every 2s at 30 fps
+		// Bitrate tuned for cellular last-mile RLC buffers: average
+		// 1500k + capped peak via small vbv buffer (250ms). This
+		// flattens IDR bursts that the mobile last hop drops, at the
+		// cost of slightly softer textures. Keeps 1280x720 resolution.
+		"-b:v", "1500k",
+		"-maxrate", "1500k",
+		"-bufsize", "750k",
+		"-g", "90", // keyframe every 3s at 30 fps (less frequent burst)
 		"-an",
 		"-f", "rtp",
 		"-payload_type", "96",
